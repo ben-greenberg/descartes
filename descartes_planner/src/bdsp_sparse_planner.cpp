@@ -24,80 +24,37 @@
  * limitations under the License.
  */
 
+#include <chrono>
+
+#include <numeric>
+
 #include <console_bridge/console.h>
 
 #include <descartes_planner/bdsp_sparse_planner.h>
 
+bool mapIndices(const std::map<std::size_t, std::size_t>& index_mappings, const std::vector<std::size_t>& src_indices,
+                std::vector<std::size_t>& dst_indices)
+{
+  for(const auto src_idx : src_indices)
+  {
+    if(index_mappings.count(src_idx) == 0)
+    {
+      return false;
+    }
+    dst_indices.push_back(index_mappings.at(src_idx));
+  }
+  return true;
+}
+
 namespace descartes_planner
 {
-/**
- *
- * @tparam FloatT
- * @class descartes_planner::UnarySampler: public PointSampler<FloatT>
- * @brief Utility class used by the sparse planner to store a single sample point data computed during the sparse solving stage
- */
-template<typename FloatT>
-class UnarySampler: public PointSampler<FloatT>
-{
-public:
-  UnarySampler(typename PointData<FloatT>::ConstPtr ref_point):
-    ref_point_(ref_point)
-  {
-
-  }
-
-  ~UnarySampler()
-  {
-
-  }
-
-  /**
-   * @brief this method generates the samples
-   */
-  typename PointSampleGroup<FloatT>::Ptr generate() override
-  {
-    typename PointSampleGroup<FloatT>::Ptr sample_group = std::make_shared<PointSampleGroup<FloatT>>();
-    sample_group->point_id = ref_point_->point_id;
-    sample_group->num_samples = 1;
-    sample_group->num_dofs = ref_point_->values.size();
-    sample_group->values = ref_point_->values;
-    return sample_group;
-  }
-
-private:
-  typename PointData<FloatT>::ConstPtr ref_point_;
-};
-
-template<typename FloatT>
-class ProxySampler: public PointSampler<FloatT>
-{
-public:
-  ProxySampler(typename PointSampleGroup<FloatT>::Ptr sample_group):
-    sample_group_(sample_group)
-  {
-
-  }
-
-  ~ProxySampler()
-  {
-
-  }
-
-  typename PointSampleGroup<FloatT>::Ptr generate() override
-  {
-    return sample_group_;
-  }
-
-private:
-  typename PointSampleGroup<FloatT>::Ptr sample_group_;
-};
 
 template<typename FloatT>
 BDSPSparsePlanner<FloatT>::BDSPSparsePlanner(typename std::shared_ptr< SamplesContainer<FloatT> > container,
-                                             bool report_failures):
-  report_failures_(report_failures),
+                                             Config cfg):
   container_(container),
-  graph_planner_(container, report_failures)
+  graph_planner_(container, cfg_.report_all_failures),
+  cfg_(cfg)
 {
 
 }
@@ -146,6 +103,11 @@ bool BDSPSparsePlanner<FloatT>::build(std::vector< typename PointSampler<FloatT>
   // clearing arrays
   failed_points_.clear();
   failed_edges_.clear();
+  sparse_index_mappings_.clear();
+  int current_resampling_attempts = 0;
+
+  // start time before sparse planning
+  auto start_time = std::chrono::steady_clock::now();
 
   // get selected points and edges first
   std::vector< typename PointSampler<FloatT>::Ptr > selected_sparse_points;
@@ -153,6 +115,8 @@ bool BDSPSparsePlanner<FloatT>::build(std::vector< typename PointSampler<FloatT>
   for(const auto& idx : selected_sparse_points_indices)
   {
     selected_sparse_points.push_back(points[idx]);
+    std::size_t sparse_idx = selected_sparse_points.size() - 1;
+    sparse_index_mappings_.insert(std::make_pair(sparse_idx, idx));
   }
 
   for(std::size_t i = 0; i < selected_sparse_points_indices.size() - 1; i++)
@@ -161,23 +125,29 @@ bool BDSPSparsePlanner<FloatT>::build(std::vector< typename PointSampler<FloatT>
     selected_sparsed_edge_evaluators.push_back(edge_evaluators[idx]);
   }
 
-  // build and solve for selected points now
+  // build and solve for selected sparse points now
   std::vector< typename PointData<FloatT>::ConstPtr > sparse_solution_points;
   {
-    BDSPGraphPlanner<FloatT> graph_planner(container_, report_failures_);
+    BDSPGraphPlanner<FloatT> graph_planner(container_, cfg_.report_all_failures);
     if(!graph_planner.build(selected_sparse_points, selected_sparsed_edge_evaluators ))
     {
-      CONSOLE_BRIDGE_logError("Failed to build graph for selected points");
+      CONSOLE_BRIDGE_logError("Failed to build sparse graph");
+      std::vector<std::size_t> failed_sparse_points, failed_sparse_edges;
+      graph_planner.getFailedPoints(failed_sparse_points);
+      graph_planner.getFailedEdges(failed_sparse_edges);
+      mapIndices(sparse_index_mappings_,failed_sparse_points, failed_points_);
+      mapIndices(sparse_index_mappings_,failed_sparse_edges, failed_edges_);
       return false;
     }
 
     if(!graph_planner.solve(sparse_solution_points))
     {
-      CONSOLE_BRIDGE_logError("Failed to solve graph for selected points");
+      CONSOLE_BRIDGE_logError("Failed to solve sparse graph");
       return false;
     }
   }
-  CONSOLE_BRIDGE_logInform("Found sparse solution with %lu points", selected_sparse_points.size());
+  double seconds_elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
+  CONSOLE_BRIDGE_logInform("Found sparse solution with %lu points in %f seconds", selected_sparse_points.size(), seconds_elapsed);
 
   // now build graph for sparse and intermediate points
   std::vector< typename PointSampler<FloatT>::Ptr > dense_point_samplers;
@@ -192,8 +162,8 @@ bool BDSPSparsePlanner<FloatT>::build(std::vector< typename PointSampler<FloatT>
     // initial and final sampler for this segment only return a single point sample
     typename PointData<FloatT>::ConstPtr point_data_0 = sparse_solution_points[i-1];
     typename PointData<FloatT>::ConstPtr point_data_f = sparse_solution_points[i];
-    sampler_0 = std::make_shared<UnarySampler<FloatT>>(point_data_0);
-    sampler_f = std::make_shared<UnarySampler<FloatT>>(point_data_f);
+    sampler_0 = std::make_shared<ProxySampler<FloatT>>(point_data_0);
+    sampler_f = std::make_shared<ProxySampler<FloatT>>(point_data_f);
     dense_point_samplers.push_back(sampler_0);
 
     if(pf_idx - p0_idx <= 1 )
@@ -212,15 +182,22 @@ bool BDSPSparsePlanner<FloatT>::build(std::vector< typename PointSampler<FloatT>
       auto interpolated_point_data = point_data_0->interpolate(t, point_data_f);
       typename PointSampleGroup<FloatT>::Ptr closest_sample_group = intermediate_sampler->getClosest(interpolated_point_data);
 
+      if(!closest_sample_group && current_resampling_attempts <= cfg_.max_resampling_attempts)
+      {
+        CONSOLE_BRIDGE_logWarn("Failed to generate closest samples for point %lu, generating all samples for point",ii);
+        closest_sample_group = intermediate_sampler->generate();
+        current_resampling_attempts++;
+      }
+
       if(!closest_sample_group)
       {
-        if(report_failures_)
+        failed_points_.push_back(i);
+        if(cfg_.report_all_failures)
         {
-          failed_points_.push_back(i);
           continue;
         }
 
-        CONSOLE_BRIDGE_logError("Failed to generate closest samples for intermediate point %lu",ii);
+        CONSOLE_BRIDGE_logError("Failed to generate valid samples for intermediate point %lu",ii);
         return false;
       }
       // create proxy sampler that just returns the closest samples
@@ -236,17 +213,72 @@ bool BDSPSparsePlanner<FloatT>::build(std::vector< typename PointSampler<FloatT>
   {
     return false;
   }
-  CONSOLE_BRIDGE_logInform("Dense interpolated trajectory has %lu points, original had %lu points",
+  CONSOLE_BRIDGE_logDebug("Complete trajectory has %lu points, original had %lu points",
                            dense_point_samplers.size(), points.size());
 
   // build graph with all points now
   failed_points_.clear();
   failed_edges_.clear();
-  bool succeeded = graph_planner_.build(dense_point_samplers, edge_evaluators);
-  if(!succeeded && report_failures_)
+  bool succeeded = false;
+  std::size_t previous_failed_edge_idx = std::numeric_limits<std::size_t>::infinity();
+
+  while(current_resampling_attempts <= cfg_.max_resampling_attempts)
   {
-    graph_planner_.getFailedPoints(failed_points_);
-    graph_planner_.getFailedEdges(failed_edges_);
+
+    bool report_failures = current_resampling_attempts == cfg_.max_resampling_attempts ? cfg_.report_all_failures : false;
+    graph_planner_ = BDSPGraphPlanner<FloatT>(container_, report_failures);
+    succeeded = graph_planner_.build(dense_point_samplers, edge_evaluators);
+
+    if(!succeeded)
+    {
+      std::vector<std::size_t> temp_failed_edges;
+      graph_planner_.getFailedEdges(temp_failed_edges);
+
+      if(temp_failed_edges.empty())
+      {
+        CONSOLE_BRIDGE_logError("Failed to build graph and no failed edge was reported");
+        break;
+      }
+
+      if(previous_failed_edge_idx == temp_failed_edges.front())
+      {
+        CONSOLE_BRIDGE_logError("Failed to build graph after resampling points near edge %lu",previous_failed_edge_idx);
+        break;
+      }
+
+      CONSOLE_BRIDGE_logWarn("Failed to build graph at edge %lu, resampling points", temp_failed_edges.front());
+      previous_failed_edge_idx = temp_failed_edges.front();
+      std::vector<int> resample_point_ids(2 + cfg_.num_resample_points_before + cfg_.num_resample_points_after);
+      std::iota(resample_point_ids.begin(), resample_point_ids.end(), previous_failed_edge_idx - cfg_.num_resample_points_before);
+
+      for(int idx : resample_point_ids)
+      {
+        if(idx < 0 || idx >= points.size())
+        {
+          continue;
+        }
+
+        typename PointSampleGroup<FloatT>::Ptr sample_group = points[idx]->generate();
+        if(!sample_group)
+        {
+          break;
+        }
+        typename PointSampler<FloatT>::Ptr proxy_sampler = std::make_shared<ProxySampler<FloatT>>(sample_group);
+        dense_point_samplers[idx] = proxy_sampler;
+      }
+
+      current_resampling_attempts++;
+    }
+    else
+    {
+      break;
+    }
+
+    if(!succeeded)
+    {
+      graph_planner_.getFailedPoints(failed_points_);
+      graph_planner_.getFailedEdges(failed_edges_);
+    }
   }
 
   return succeeded;
@@ -259,17 +291,15 @@ bool BDSPSparsePlanner<FloatT>::solve(std::vector< typename PointData<FloatT>::C
 }
 
 template<typename FloatT>
-bool BDSPSparsePlanner<FloatT>::getFailedEdges(std::vector<std::size_t>& failed_edges)
+void BDSPSparsePlanner<FloatT>::getFailedEdges(std::vector<std::size_t>& failed_edges)
 {
   failed_edges = failed_edges_;
-  return report_failures_;
 }
 
 template<typename FloatT>
-bool BDSPSparsePlanner<FloatT>::getFailedPoints(std::vector<std::size_t>& failed_points)
+void BDSPSparsePlanner<FloatT>::getFailedPoints(std::vector<std::size_t>& failed_points)
 {
   failed_points = failed_points_;
-  return report_failures_;
 }
 
 // explicit specializations

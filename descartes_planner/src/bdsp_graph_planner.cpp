@@ -27,9 +27,9 @@ namespace descartes_planner
 
 template<typename FloatT>
 descartes_planner::BDSPGraphPlanner<FloatT>::BDSPGraphPlanner(typename std::shared_ptr< SamplesContainer<FloatT> > container,
-                                                    bool report_failures):
+                                                    bool report_all_failures):
   container_(container),
-  report_failures_(report_failures)
+  report_all_failures_(report_all_failures)
 {
   if(container_ == nullptr)
   {
@@ -135,9 +135,9 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
     if(!samples || samples->values.empty())
     {
       CONSOLE_BRIDGE_logError("Failed to generate samples for point %lu",i);
-      if(report_failures_)
+      failed_points_.push_back(i);
+      if(report_all_failures_)
       {
-        failed_points_.push_back(i);
         continue;
       }
       return false;
@@ -201,9 +201,9 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
     {
       CONSOLE_BRIDGE_logError("Edge evaluation between points %lu and %lu failed", samples1->point_id,
                               samples2->point_id);
-      if(report_failures_)
+      failed_edges_.push_back(p1_idx);
+      if(report_all_failures_)
       {
-        failed_edges_.push_back(p1_idx);
         continue;
       }
       return false;
@@ -240,9 +240,9 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
       {
         CONSOLE_BRIDGE_logError("Edge between points %lu and %lu has no continuous path", samples1->point_id,
                                 samples2->point_id);
-        if(report_failures_)
+        failed_edges_.push_back(p1_idx);
+        if(report_all_failures_)
         {
-          failed_edges_.push_back(p1_idx);
           continue;
         }
         return false;
@@ -326,6 +326,11 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
     if(src_vertices_added.empty() || dst_vertices_added.empty())
     {
       CONSOLE_BRIDGE_logError("No continuous path could be found between points %i and %i",p1_idx, p2_idx);
+      failed_edges_.push_back(p1_idx);
+      if(report_all_failures_)
+      {
+        continue;
+      }
       return false;
     }
 
@@ -345,29 +350,21 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
 }
 
 template<typename FloatT>
-bool descartes_planner::BDSPGraphPlanner<FloatT>::getFailedEdges(std::vector<std::size_t>& failed_edges)
+void descartes_planner::BDSPGraphPlanner<FloatT>::getFailedEdges(std::vector<std::size_t>& failed_edges)
 {
- if(!report_failures_)
- {
-   CONSOLE_BRIDGE_logError("Planner was not configured to report failures");
-   return false;
- }
-
- failed_edges = failed_edges_;
- return true;
+  failed_edges = failed_edges_;
 }
 
 template<typename FloatT>
-bool descartes_planner::BDSPGraphPlanner<FloatT>::getFailedPoints(std::vector<std::size_t>& failed_points)
+void descartes_planner::BDSPGraphPlanner<FloatT>::getFailedPoints(std::vector<std::size_t>& failed_points)
 {
-  if(!report_failures_)
-  {
-    CONSOLE_BRIDGE_logError("Planner was not configured to report failures");
-    return false;
-  }
-
   failed_points = failed_points_;
-  return true;
+}
+
+template<typename FloatT>
+std::shared_ptr< const SamplesContainer<FloatT> > descartes_planner::BDSPGraphPlanner<FloatT>::getContainer() const
+{
+  return container_;
 }
 
 template<typename FloatT>

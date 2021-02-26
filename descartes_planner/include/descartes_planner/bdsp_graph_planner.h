@@ -91,7 +91,8 @@ public:
    * @param report_failures Whether or not to report failed points and edges.  Use getFailedPoints and getFailedEdges in
    *                        order to get the indices where the planner failed.
    */
-  BDSPGraphPlanner(typename std::shared_ptr< SamplesContainer<FloatT> > container = nullptr, bool report_failures = false);
+  BDSPGraphPlanner(typename std::shared_ptr< SamplesContainer<FloatT> > container = std::make_shared< DefaultSamplesContainer<FloatT> >(),
+                   bool report_all_failures = false);
 
   virtual ~BDSPGraphPlanner();
 
@@ -120,8 +121,10 @@ public:
    */
   bool solve(std::vector< typename PointData<FloatT>::ConstPtr >& solution_points);
 
-  bool getFailedEdges(std::vector<std::size_t>& failed_edges);
-  bool getFailedPoints(std::vector<std::size_t>& failed_points);
+  void getFailedEdges(std::vector<std::size_t>& failed_edges);
+  void getFailedPoints(std::vector<std::size_t>& failed_points);
+
+  std::shared_ptr< const SamplesContainer<FloatT> > getContainer() const;
 
 private:
 
@@ -151,7 +154,7 @@ private:
   std::map<int, VertexProperties> end_vertices_;
   typename std::shared_ptr< SamplesContainer<FloatT> > container_;
 
-  bool report_failures_;
+  bool report_all_failures_;
   std::vector<std::size_t> failed_points_;
   std::vector<std::size_t> failed_edges_;
 

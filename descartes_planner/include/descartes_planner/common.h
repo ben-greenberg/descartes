@@ -110,6 +110,52 @@ namespace descartes_planner
     typedef typename std::shared_ptr<const PointSampler<FloatT> > ConstPtr;
   };
 
+  /**
+   * @class descartes_planner::ProxySampler
+   * @brief Convenience class that is used to hold a pre-computed sample group
+   */
+  template<typename FloatT>
+  class ProxySampler: public PointSampler<FloatT>
+  {
+  public:
+    /**
+     * @brief Default constructor that stores the sample group passed
+     * @param sample_group The sample group to store and return through the generate() method
+     */
+    ProxySampler(typename PointSampleGroup<FloatT>::Ptr sample_group):
+      sample_group_(sample_group)
+    {
+
+    }
+
+    /**
+     * @brief alternative constructor that creates an internal sample group that holds a single sample point
+     * @param sample_point  The sample point from which the sample group is created
+     */
+    ProxySampler(typename PointData<FloatT>::ConstPtr sample_point)
+    {
+      typename PointSampleGroup<FloatT>::Ptr sample_group = std::make_shared<PointSampleGroup<FloatT>>();
+      sample_group->point_id = sample_point->point_id;
+      sample_group->num_samples = 1;
+      sample_group->num_dofs = sample_point->values.size();
+      sample_group->values = sample_point->values;
+      sample_group_ = sample_group;
+    }
+
+    ~ProxySampler()
+    {
+
+    }
+
+    typename PointSampleGroup<FloatT>::Ptr generate() override
+    {
+      return sample_group_;
+    }
+
+  private:
+    typename PointSampleGroup<FloatT>::Ptr sample_group_;
+  };
+
   struct VertexProperties
   {
     virtual ~VertexProperties(){}
