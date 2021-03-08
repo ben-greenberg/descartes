@@ -159,7 +159,7 @@ namespace descartes_planner
   struct VertexProperties
   {
     virtual ~VertexProperties(){}
-    int point_id = 0;
+    std::size_t point_id = 0;
     std::size_t sample_index = 0;
   };
 
@@ -183,10 +183,14 @@ namespace descartes_planner
      * @brief evaluates all the edges between the samples of s1 and s2.
      * @param s1  A point sample group with n1 samples
      * @param s2  A point sample group with n2 samples
+     * @param exclude_s1 list of indices in sample group 1 to exclude from the evaluation
+     * @param exclude_s2 list of indices in sample group 2 to exclude from the evaluation
      * @return  Returns a n1 x n2 vector of EdgeProperties objects
      */
     virtual std::vector< EdgeProperties<FloatT> > evaluate(typename PointSampleGroup<FloatT>::ConstPtr s1,
-                                                            typename PointSampleGroup<FloatT>::ConstPtr s2) const = 0;
+                                                            typename PointSampleGroup<FloatT>::ConstPtr s2,
+                                                            const std::vector<std::size_t>& exclude_s1 = {},
+                                                            const std::vector<std::size_t>& exclude_s2 = {}) const = 0;
 
     typedef typename std::shared_ptr<EdgeEvaluator> Ptr;
     typedef typename std::shared_ptr<const EdgeEvaluator> ConstPtr;

@@ -104,7 +104,7 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector< typename Po
 
 template<typename FloatT>
 std::vector< EdgeProperties<FloatT> > descartes_planner::BDSPGraphPlanner<FloatT>::filterDisconnectedEdges(
-    const std::vector< EdgeProperties<FloatT> >& edges,const std::map<int, VertexProperties>& connected_src_vertices,
+    const std::vector< EdgeProperties<FloatT> >& edges,const std::map<std::size_t, VertexProperties>& connected_src_vertices,
     std::uint32_t current_vertex_count) const
 {
   auto new_edges = edges;
@@ -129,6 +129,7 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
   graph_.clear();
 
   // generating samples now
+  std::size_t max_num_samples = 0;
   for(std::size_t  i = 0; i < points_.size(); i++)
   {
     typename PointSampleGroup<FloatT>::Ptr samples = points_[i]->generate();
@@ -143,6 +144,7 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
       return false;
     }
     container_->at(i) = samples;
+    max_num_samples = max_num_samples < samples->num_samples ? samples->num_samples : max_num_samples;
   }
 
   // no need to proceed if sample generation failed
@@ -158,12 +160,17 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
 
   std::uint32_t vertex_count = 1;
   bool add_virtual_vertex = true;
-  std::map<int, VertexProperties> src_vertices_added;
-  std::map<int, VertexProperties> dst_vertices_added;
+  std::map<std::size_t, VertexProperties> src_vertices_added;
+  std::map<std::size_t, VertexProperties> dst_vertices_added;
+  std::vector<bool> dst_sample_indices_added(max_num_samples, false);
+  std::vector<std::size_t> src_vertices_disconnected;
+  src_vertices_disconnected.reserve(max_num_samples);
 
   // use samples to populate edges in order to build the search graph
   for(std::size_t i = 1; i < points_.size(); i++)
   {
+
+    // geting samples for both points
     std::size_t p1_idx = i -1;
     std::size_t p2_idx = i;
 
@@ -192,10 +199,28 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
       return false;
     }
 
+    // updating vector of disconnected vertices in source point
+    src_vertices_disconnected.clear();
+    if(!dst_vertices_added.empty())
+    {
+      for(std::size_t ii = 0; ii < samples1->num_samples; ii++)
+      {
+        if(!dst_sample_indices_added[ii])
+        {
+          src_vertices_disconnected.push_back(ii);
+        }
+      }
+      CONSOLE_BRIDGE_logDebug("Found %lu disconnected samples of %lu in source point %lu",
+                             src_vertices_disconnected.size(), samples1->num_samples, p1_idx);
+    }
+
+    // reseting array
+    std::fill(dst_sample_indices_added.begin(), dst_sample_indices_added.end(), false);
+
     // evaluate edges
     using EdgeProp = EdgeProperties<FloatT>;
     auto edge_evaluator = getEdgeEvaluator(p1_idx);
-    std::vector< EdgeProperties<FloatT> > edges = edge_evaluator->evaluate(samples1, samples2);
+    std::vector< EdgeProperties<FloatT> > edges = edge_evaluator->evaluate(samples1, samples2, src_vertices_disconnected, {});
 
     if(edges.empty())
     {
@@ -321,6 +346,7 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
 
       src_vertices_added[src_vtx_index] = edge.src_vtx;
       dst_vertices_added[dst_vtx_index] = edge.dst_vtx;
+      dst_sample_indices_added[edge.dst_vtx.sample_index] = true;
     }
 
     if(src_vertices_added.empty() || dst_vertices_added.empty())
@@ -440,10 +466,12 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::solve(
     .distance_map(boost::make_iterator_property_map(weights.begin(),get(boost::vertex_index, graph_)))
     .predecessor_map(&predecessors[0]));*/
 
+  CONSOLE_BRIDGE_logDebug("Descartes Searching through graph now ...");
   boost::dijkstra_shortest_paths_no_color_map(graph_, virtual_vertex,
    weight_map(get(&EdgeProperties<FloatT>::weight, graph_))
    .distance_map(boost::make_iterator_property_map(weights.begin(),get(boost::vertex_index, graph_)))
    .predecessor_map(boost::make_iterator_property_map(predecessors.begin(),get(boost::vertex_index, graph_))));
+  CONSOLE_BRIDGE_logDebug("Descartes graph search completed");
 
   CONSOLE_BRIDGE_logDebug("Num vertices %i", num_vert);
   CONSOLE_BRIDGE_logDebug("Predecessor array size %lu",predecessors.size());
@@ -455,7 +483,7 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::solve(
   typename GraphT::vertex_descriptor cheapest_end_vertex = -1;
   double cost = std::numeric_limits<FloatT>::infinity();
 
-  for(std::map<int, VertexProperties>::value_type& kv: end_vertices_)
+  for(const auto& kv: end_vertices_)
   {
     typename GraphT::vertex_descriptor candidate_vertex = kv.first;
     CONSOLE_BRIDGE_logDebug("Searching end vertex %i with cost %f", candidate_vertex,
