@@ -131,7 +131,7 @@ private:
   typename EdgeEvaluator<FloatT>::ConstPtr getEdgeEvaluator(std::uint32_t idx);
 
   std::vector< EdgeProperties<FloatT> > filterDisconnectedEdges(const std::vector< EdgeProperties<FloatT> >& edges,
-                                                                const std::map<int, VertexProperties>& connected_src_vertices,
+                                                                const std::map<std::size_t, VertexProperties>& connected_src_vertices,
                                                                 std::uint32_t current_vertex_count) const;
 
   void setup(std::vector< typename PointSampler<FloatT>::Ptr >& points,
@@ -151,7 +151,7 @@ private:
   GraphT graph_;
   std::vector< typename PointSampler<FloatT>::Ptr > points_;
   std::vector< typename EdgeEvaluator<FloatT>::ConstPtr > edge_evaluators_;
-  std::map<int, VertexProperties> end_vertices_;
+  std::map<std::size_t, VertexProperties> end_vertices_;
   typename std::shared_ptr< SamplesContainer<FloatT> > container_;
 
   bool report_all_failures_;
