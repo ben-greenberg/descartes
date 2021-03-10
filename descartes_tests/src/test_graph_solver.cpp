@@ -298,7 +298,9 @@ public:
   }
 
   std::vector< EdgePropertiesF > evaluate(PointSampleGroupT::ConstPtr s1,
-                                          PointSampleGroupT::ConstPtr s2) const
+                                          PointSampleGroupT::ConstPtr s2,
+                                          const std::vector<std::size_t>& exclude_s1 = {},
+                                          const std::vector<std::size_t>& exclude_s2 = {}) const
   {
     using namespace Eigen;
     std::vector< EdgePropertiesF > edges;
