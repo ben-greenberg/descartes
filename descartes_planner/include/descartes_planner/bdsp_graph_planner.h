@@ -115,6 +115,15 @@ public:
              std::vector<typename EdgeEvaluator<FloatT>::ConstPtr>& edge_evaluators);
 
   /**
+   * @brief Just sample the waypoints passed
+   * @param points          A vector of point samplers
+   * @param edge_evaluator  A vector of speed evaluators, the vector size should be one less than the point samplers vector
+   * @return True if sampling succeeds, otherwise false
+   */
+  bool sample(std::vector< typename PointSampler<FloatT>::Ptr >& points,
+             std::vector<typename EdgeEvaluator<FloatT>::ConstPtr>& edge_evaluators);
+
+  /**
    * @brief solves the plan by searching for the lowest cost solution, use only after calling the build method
    * @param solution_points  The solution
    * @return True on success, false otherwise

@@ -376,6 +376,33 @@ bool descartes_planner::BDSPGraphPlanner<FloatT>::build(std::vector<typename Poi
 }
 
 template<typename FloatT>
+bool descartes_planner::BDSPGraphPlanner<FloatT>::sample(std::vector<typename PointSampler<FloatT>::Ptr>& points,
+                                                   std::vector<typename EdgeEvaluator<FloatT>::ConstPtr>& edge_evaluators)
+{
+  setup(points, edge_evaluators);
+
+  //// adding virtual vertex
+  graph_.clear();
+
+  // generating samples now
+  for(std::size_t  i = 0; i < points_.size(); i++)
+  {
+    typename PointSampleGroup<FloatT>::Ptr samples = points_[i]->generate();
+    if(!samples || samples->values.empty())
+    {
+      CONSOLE_BRIDGE_logError("Failed to generate samples for point %lu",i);
+      failed_points_.push_back(i);
+      if(report_all_failures_)
+      {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+}
+
+template<typename FloatT>
 void descartes_planner::BDSPGraphPlanner<FloatT>::getFailedEdges(std::vector<std::size_t>& failed_edges)
 {
   failed_edges = failed_edges_;
